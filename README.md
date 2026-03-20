@@ -8,26 +8,20 @@ Ralph fetches open GitHub Issues, has an AI prioritise them, then delegates each
 
 ## Installation
 
-Install the skill into your agent CLI:
-
 ```bash
-# Claude Code
-claude skill install wiggum-agent-setup
-
-# Gemini CLI
-gemini skill install wiggum-agent-setup
+npx skills add wayfarerboy/wiggum-agent-setup
 ```
 
 ## Usage
 
 Invoke Ralph with `/wiggum`:
 
-| Command | What it does |
-|---|---|
-| `/wiggum init` | One-time setup — copies `ralph.sh` and `AGENT.md` into your project root |
-| `/wiggum update` | Refreshes those files from the latest skill templates |
-| `/wiggum add-task` | Creates a labelled GitHub Issue for Ralph to pick up |
-| `/wiggum help` | Full documentation |
+| Command            | What it does                                                             |
+| ------------------ | ------------------------------------------------------------------------ |
+| `/wiggum init`     | One-time setup — copies `ralph.sh` and `AGENT.md` into your project root |
+| `/wiggum update`   | Refreshes those files from the latest skill templates                    |
+| `/wiggum add-task` | Creates a labelled GitHub Issue for Ralph to pick up                     |
+| `/wiggum help`     | Full documentation                                                       |
 
 ## Quickstart
 
@@ -64,14 +58,14 @@ ralph: pending  →  ralph: in-progress  →  ralph: completed
 
 Labels are bootstrapped automatically on the first run.
 
-| Label | Purpose |
-|---|---|
-| `ralph: pending` | Queued for Ralph to pick up |
-| `ralph: in-progress` | Currently being worked on |
-| `ralph: completed` | Done |
-| `ralph: failed` | Something went wrong — check the log |
-| `type: bug` / `type: feature` | Issue type |
-| `priority: now / high / medium / low` | Determines ordering |
+| Label                                 | Purpose                              |
+| ------------------------------------- | ------------------------------------ |
+| `ralph: pending`                      | Queued for Ralph to pick up          |
+| `ralph: in-progress`                  | Currently being worked on            |
+| `ralph: completed`                    | Done                                 |
+| `ralph: failed`                       | Something went wrong — check the log |
+| `type: bug` / `type: feature`         | Issue type                           |
+| `priority: now / high / medium / low` | Determines ordering                  |
 
 ## Flags
 
@@ -83,12 +77,12 @@ Labels are bootstrapped automatically on the first run.
 
 ## Prerequisites
 
-| Tool | Install | Notes |
-|---|---|---|
-| `gh` | `brew install gh` | Run `gh auth login` once |
-| `jq` | `brew install jq` | JSON processor |
+| Tool                 | Install                                                                                           | Notes                                             |
+| -------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `gh`                 | `brew install gh`                                                                                 | Run `gh auth login` once                          |
+| `jq`                 | `brew install jq`                                                                                 | JSON processor                                    |
 | `claude` or `gemini` | [Claude Code](https://claude.ai/code) / [Gemini CLI](https://github.com/google-gemini/gemini-cli) | AI engine (Claude is primary, Gemini is fallback) |
-| `pnpm` | `npm i -g pnpm` | Used for Gemini CLI |
+| `pnpm`               | `npm i -g pnpm`                                                                                   | Used for Gemini CLI                               |
 
 ## Tips
 
