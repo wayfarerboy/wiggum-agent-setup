@@ -8,13 +8,15 @@
 # Flags
 # ---------------------------------------------------------------------------
 MODE="pending"  # default: only issues labelled "ralph: pending"
+RETRY_FAILED=false
 
 usage() {
   echo "Usage: ralph.sh [OPTIONS]"
   echo ""
   echo "Options:"
-  echo "  --bugs     Ignore 'ralph: pending' label and work on all open bug issues (type: bug)"
-  echo "  --help     Show this help message and exit"
+  echo "  --bugs          Ignore 'ralph: pending' label and work on all open bug issues (type: bug)"
+  echo "  --retry-failed  Re-fetch issues with 'ralph: failed' label and attempt them again"
+  echo "  --help          Show this help message and exit"
   echo ""
   echo "Default behaviour (no flags): process issues labelled 'ralph: pending'."
   exit 0
@@ -22,9 +24,10 @@ usage() {
 
 for arg in "$@"; do
   case "$arg" in
-    --bugs)   MODE="bugs" ;;
-    --help)   usage ;;
-    *)        echo "Unknown flag: $arg"; usage ;;
+    --bugs)          MODE="bugs" ;;
+    --retry-failed)  RETRY_FAILED=true ;;
+    --help)          usage ;;
+    *)               echo "Unknown flag: $arg"; usage ;;
   esac
 done
 
@@ -123,6 +126,7 @@ ensure_label "ralph: pending" "FEF2C0" "Queued for Ralph agent run"
 ensure_label "ralph: in-progress" "0075CA" "Currently being worked on by a Ralph agent"
 ensure_label "ralph: completed" "0E8A16" "Completed by Ralph agent"
 ensure_label "ralph: failed" "B60205" "Failed during Ralph agent run"
+ensure_label "ralph: retry" "FFA500" "Failed due to quota/rate limit, ready for retry"
 ensure_label "type: bug" "B233F1" "Something isn't working"
 ensure_label "type: feature" "1D76DB" "New feature or request"
 
@@ -151,11 +155,21 @@ while true; do
       2>/tmp/ralph_gh_stderr)
     # Strip out any issues already claimed by another Ralph instance
     issues_json=$(echo "$issues_json" | jq '[.[] | select(.labels | map(.name) | index("ralph: in-progress") | not)]')
-  else
-    log "Mode: pending (issues labelled 'ralph: pending', excluding in-progress)"
+  elif [ "$RETRY_FAILED" = true ]; then
+    log "Mode: retry-failed (issues labelled 'ralph: failed', excluding in-progress)"
     issues_json=$(gh issue list \
       --state open \
-      --label "ralph: pending" \
+      --label "ralph: failed" \
+      --json number,title,body,labels \
+      --limit 100 \
+      2>/tmp/ralph_gh_stderr)
+    issues_json=$(echo "$issues_json" | jq '[.[] | select(.labels | map(.name) | index("ralph: in-progress") | not)]')
+  else
+    log "Mode: pending (issues labelled 'ralph: pending' or 'ralph: retry', excluding in-progress)"
+    # Fetch issues that have either 'ralph: pending' OR 'ralph: retry'
+    issues_json=$(gh issue list \
+      --state open \
+      --search "label:\"ralph: pending\" OR label:\"ralph: retry\"" \
       --json number,title,body,labels \
       --limit 100 \
       2>/tmp/ralph_gh_stderr)
@@ -224,7 +238,7 @@ $issues_json"
   # -------------------------------------------------------------------------
   # Step 3: Process the highest-priority issue.
   # -------------------------------------------------------------------------
-  task=$(gh issue view "$number" --json number,title,body,labels 2>/tmp/ralph_gh_stderr)
+  task=$(gh issue view "$number" --json number,title,body,labels,comments 2>/tmp/ralph_gh_stderr)
   gh_task_exit=$?
   if [ $gh_task_exit -ne 0 ]; then
     log "Could not fetch issue #$number (exit $gh_task_exit): $(cat /tmp/ralph_gh_stderr) — skipping."
@@ -236,23 +250,48 @@ $issues_json"
 
   title=$(echo "$task" | jq -r '.title')
   desc=$(echo "$task" | jq -r '.body // ""')
+  comment_count=$(echo "$task" | jq '.comments | length')
+  if [ "$comment_count" -gt 0 ]; then
+    comments_text=$(echo "$task" | jq -r '.comments[] | "--- Comment by \(.author.login) ---\n\(.body)\n"')
+    log "Issue #$number has $comment_count comment(s) — including in prompt."
+  else
+    comments_text=""
+    log "Issue #$number has no comments."
+  fi
 
   log "Claiming issue #$number: $title (marking as in-progress)"
-  gh issue edit "$number" --remove-label "ralph: pending" --add-label "ralph: in-progress" 2>/dev/null || true
+  gh issue edit "$number" --remove-label "ralph: pending" --remove-label "ralph: retry" --remove-label "ralph: failed" --add-label "ralph: in-progress" 2>/dev/null || true
   log "====================================================="
 
-  prompt="Task: $title. Description: $desc. Refer to AGENT.md for guidelines. Ensure you run pnpm test, pnpm run lint and pnpm run build before finishing. If all pass, automatically commit your changes with a conventional commit message. Include 'Fixes #$number' in the commit message body so GitHub closes the issue automatically. Do not ask for permission."
+  if [ -n "$comments_text" ]; then
+    prompt="Task: $title. Description: $desc. Issue comments (read these for additional context, decisions, and discussion): $comments_text. Refer to AGENT.md for guidelines. Ensure you run pnpm test, pnpm run lint and pnpm run build before finishing. If all pass, automatically commit your changes with a conventional commit message. Include 'Fixes #$number' in the commit message body so GitHub closes the issue automatically. Do not ask for permission."
+  else
+    prompt="Task: $title. Description: $desc. Refer to AGENT.md for guidelines. Ensure you run pnpm test, pnpm run lint and pnpm run build before finishing. If all pass, automatically commit your changes with a conventional commit message. Include 'Fixes #$number' in the commit message body so GitHub closes the issue automatically. Do not ask for permission."
+  fi
 
-  run_agent_task "$prompt"
-
-  exit_code=$?
+  output_log="/tmp/ralph_task_output_#$number.log"
+  run_agent_task "$prompt" 2>&1 | tee "$output_log"
+  exit_code=${PIPESTATUS[0]}
 
   if [ $exit_code -eq 0 ]; then
     log "Issue #$number completed successfully. Updating labels..."
     gh issue edit "$number" --remove-label "ralph: in-progress" --add-label "ralph: completed" 2>/dev/null || true
   else
-    log "Issue #$number failed (exit $exit_code). Updating labels..."
-    gh issue edit "$number" --remove-label "ralph: in-progress" --add-label "ralph: failed" 2>/dev/null || true
+    # Check if the output contains quota/rate limit strings
+    if grep -qi "quota\|rate.limit\|too many\|exceeded\|usage limit" "$output_log"; then
+      log "Issue #$number failed due to quota limit. Marking for retry..."
+      gh issue edit "$number" --remove-label "ralph: in-progress" --add-label "ralph: retry" 2>/dev/null || true
+    else
+      log "Issue #$number failed (exit $exit_code). Updating labels and adding comment..."
+      gh issue edit "$number" --remove-label "ralph: in-progress" --add-label "ralph: failed" 2>/dev/null || true
+      
+      # Extract some useful error info if possible
+      error_summary=$(tail -n 15 "$output_log" | sed 's/`//g') # avoid backtick issues in comment
+      gh issue comment "$number" --body "Ralph failed with exit code $exit_code. Last few lines of output:
+\`\`\`
+$error_summary
+\`\`\`" 2>/dev/null || true
+    fi
   fi
 
   processed_numbers="$processed_numbers $number"

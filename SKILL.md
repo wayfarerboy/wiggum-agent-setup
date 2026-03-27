@@ -95,6 +95,7 @@ Or create a GitHub Issue manually with these labels:
 | Label | Required? | Values |
 |---|---|---|
 | `ralph: pending` | Yes | Tells Ralph to pick it up |
+| `ralph: retry` | No | Automatically added on quota failure; Ralph will retry these |
 | `type: bug` or `type: feature` | Yes | Categorises the work |
 | `priority: now / high / medium / low` | Yes | Determines ordering |
 
@@ -102,19 +103,21 @@ Or create a GitHub Issue manually with these labels:
 
 ```
 ralph: pending  →  ralph: in-progress  →  ralph: completed
-                                       →  ralph: failed
+ralph: retry    ↗                      →  ralph: failed
 ```
 
 - **`ralph: pending`** — waiting in the queue
+- **`ralph: retry`** — waiting for quota reset; Ralph picks these up automatically
 - **`ralph: in-progress`** — actively being worked on (prevents two Ralph instances claiming the same task)
 - **`ralph: completed`** — done; GitHub closes the issue automatically if the commit contains `Fixes #N`
-- **`ralph: failed`** — something went wrong; check the log file printed at startup
+- **`ralph: failed`** — something went wrong; check the log file printed at startup or the issue comment
 
 #### Flags
 
 ```bash
-./ralph.sh           # Process all issues labelled ralph: pending (default)
+./ralph.sh           # Process all issues labelled ralph: pending or ralph: retry (default)
 ./ralph.sh --bugs    # Process all open bug issues regardless of label
+./ralph.sh --retry-failed  # Attempt to process all issues currently marked as ralph: failed
 ./ralph.sh --help    # Show usage
 ```
 
